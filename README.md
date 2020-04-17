@@ -1,5 +1,6 @@
 ## Description
 
+### Final Project
 there are 3 files under the folder, including code, dashboard, and dataset.
 
 this is the final project in my R class, i tried to use the bank dataset to analyze the feature of customers who attend this bank campaign, not only using the association rule, but also using various decision trees.
