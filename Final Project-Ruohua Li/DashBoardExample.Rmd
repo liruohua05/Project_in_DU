@@ -1,0 +1,831 @@
+---
+title: "Classification Problem"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: scroll
+    source_code: embed
+    theme: united
+---
+
+```{r setup, include=FALSE,warning=FALSE}
+#include=FALSE will not include r code in output
+#warning=FALSE will remove any warnings from output
+
+library(grid)
+library(arules) #for association rules
+library(arulesViz) #creates nicer plots to show rules
+library(GGally)
+library(broom) #for tidy() function
+library(rpart) #Partition package to create trees
+library(rpart.plot) #creates nicer tree plots
+library(caret) #Classification And REgression Training - will use to create confusion matrix
+library(plotROC) #needed for ggplot geom_roc()
+library(flexdashboard)
+library(tree)
+library(tidyverse)
+library(janitor)
+library(kernlab)
+library(gbm)
+theme_set(theme_bw())
+```
+
+```{r load_data}
+#Load the data
+df <- read.table('bank.csv', header = T, sep =";")
+df <- df %>%
+  mutate(job = gsub('blue-collar', 'blue_collar', df$job)) %>%
+  mutate(job = gsub("self-employed", "self_employed", df$job)) %>%
+  mutate(job = as.factor(job)) %>%
+  mutate(y_ind = ifelse(y == 'yes', 1, 0))
+
+```
+
+Introduction {data-orientation=rows}
+=======================================================================
+
+Row
+-----------------------------------------------------------------------
+### Executive Summary
+This project leverages the marketing campaign data from a Portuguese banking institution to predict whether the client will subscribe a term deposit. Before classification, we perform an unsupervised learning, association rules, to explore the relationship between all variables. Then, we use 5 classification methods to build different trees and different kinds of boundaries. In the end, we select random forest model to predict through looking at ROC Curve and Confusion Matrix. Although this tree is difficult to visulize, we can know age, day, pday, and balance are also important, besides outcome and duration. Thus, we need to collect data in these variables more carefully, in order to improve the accuracy.
+
+Row
+-----------------------------------------------------------------------
+### The Problem
+The bank data is related with direct marketing campaigns of a Portuguese banking institution. We use this information to explore what kinds of clients are likely to subscribe a term deposit.
+
+Row
+-----------------------------------------------------------------------
+### Data Sources
+Created by: Paulo Cortez (Univ. Minho) and Sérgio Moro (ISCTE-IUL) @ 2012
+
+Row
+-----------------------------------------------------------------------
+### The Data
+This original dataset has 4521 observations and 17 variables. For this analysis, we will create a new variable for creating ROC Curve.
+
+
+Row
+-----------------------------------------------------------------------
+VARIABLES TO PREDICT WITH
+
+* *age*: the age of each client(numeric) 
+* *job*: type of job (categorical: "admin.","unknown","unemployed","management","housemaid","entrepreneur","student", "blue-collar", "self-employed", "retired", "technician", "services")
+* *marital*: marital status (categorical: "married","divorced","single"; note: "divorced" means divorced or widowed) 
+* *education*: (categorical: "unknown","secondary","primary","tertiary") 
+* *default*: has credit in default? (binary: "yes","no")
+* *balance*: average yearly balance, in euros (numeric) 
+* *housing*: has housing loan? (binary: "yes","no") 
+* *loan*: has personal loan? (binary: "yes","no")
+* *contact*: contact communication type(categorical:"unknown","telephone","cellular")
+* *day*: last contact day of the month (numeric)
+* *month*: last contact month of year (categorical: "jan", "feb", "mar", ..., "nov", "dec")
+* *duration*: last contact duration, in seconds (numeric)
+* *campaign*: number of contacts performed during this campaign and for this client (numeric, includes last contact)
+* *pdays*: number of days that passed by after the client was last contacted from a previous campaign (numeric, -1 means client was not previously contacted)
+* *previous*: number of contacts performed before this campaign and for this client (numeric)
+* *poutcome*: outcome of the previous marketing campaign (categorical: "unknown","other","failure","success")
+
+VARIABLES WE WANT TO PREDICT
+
+* *y*:  has the client subscribed a term deposit(binary: "yes","no")
+
+Data Exploration {data-orientation=rows}
+=======================================================================
+
+Column {.sidebar data-width=500}
+-------------------------------------
+
+### Data Overview 
+We can see most clients did not subscribe a term deposit after marketing campaigns. The minimum age of clients was 19, and the maximum was 87. Most clients were from 33 to 49 years old. Clients who worked in management industry occupied the biggest part, followed by clients who were blue collar. More than half of clients were married and had finished secondary education. Just a few clients had credit in default. The range of balance was from -3313 to 71188, and the mean was 1423, and the median was 444. Most clients had housing loan but no personal loan. The main contact method was cellular, and some of them was unknown. The clients were likely to be called in the middle of the month, especially in May. The mean of the last contact duration(in seconds) was 264, and the minimum was 4 sec, and the maximum was 3025. The mean and median of the number of contacts were 2.794 and 2, respectively. Most clients were not contacted from a previous campaign. The most outcome of last campaign was unknown and failure.
+
+Column {data-width=500}
+-----------------------------------------------------------------------
+### Examine the Data
+Now we can to organize the data
+```{r, cache=TRUE}
+#View data
+summary(df)
+```
+
+
+Data Visualization {data-orientation=rows}
+=======================================================================
+
+Row {data-height=100}
+-----------------------------------------------------------------------
+### Categorical Variables
+* We can see the distribution of clients who subscribed a term deposit aross job, marital, education, and default etc.
+
+Row {.tabset}
+-----------------------------------------------------------------------
+### y yes(1)/no(0)
+```{r, cache=TRUE}
+g <- ggplot(df, aes(y))
+g + geom_bar(width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="target variable y")
+```
+
+
+### job
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(job))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="job")
+```
+
+
+### marital
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(marital))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="marital")
+```
+
+
+### education
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(education))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="education")
+```
+
+
+### default
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(default))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="default")
+```
+
+
+### housing
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(housing))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="housing")
+```
+
+
+### loan
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(loan))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="loan")
+```
+
+
+### contact
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(contact))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="contact")
+```
+
+
+### month
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(month))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="month")
+```
+
+
+### poutcome
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(poutcome))
+g + geom_bar(aes(fill = y), width = 0.5) + 
+  theme(axis.text.x = element_text(angle=65, vjust=0.6)) + 
+  labs(title="Bar Chart on Categorical Variable", 
+       subtitle="poutcome")
+```
+
+
+Row {data-height=100}
+-----------------------------------------------------------------------
+
+### Numerical Variables
+
+* We can see the different distributions of 2 outcomes in this campaign. We can observe the difference between them.
+
+
+Row {.tabset}
+-----------------------------------------------------------------------
+### age
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(age))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="age by number of term deposits subscribed",
+         x="age",
+         fill="y")
+```
+
+
+### balance
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(balance))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="balance by number of term deposits subscribed",
+         x="balance",
+         fill="y")
+```
+
+
+### day
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(day))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="day by number of term deposits subscribed",
+         x="day",
+         fill="y")
+```
+
+
+### duration
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(duration))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="duration by number of term deposits subscribed",
+         x="duration",
+         fill="y")
+```
+
+
+### campaign
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(campaign))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="campaign by number of term deposits subscribed",
+         x="campaign",
+         fill="y")
+```
+
+
+### pdays
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(pdays))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="pdays by number of term deposits subscribed",
+         x="pdays",
+         fill="y")
+```
+
+
+### previous
+
+```{r, cache=TRUE}
+g <- ggplot(df, aes(previous))
+g + geom_density(aes(fill=factor(y)), alpha=0.8) + 
+    labs(title="Density Plot on Numerical Variable", 
+         subtitle="previous by number of term deposits subscribed",
+         x="previous",
+         fill="y")
+```
+
+
+Association Rules {data-orientation=rows}
+=======================================================================
+### Association Rules
+In order to observe which categorical variables are more important to the prediction,wWe select all categorical variable to build association rules, and we only use y=yes to be the right hand side.
+
+Row {data-height=800}
+-----------------------------------------------------------------------
+
+### create association rules
+We sort the rules by lift.
+```{r, cache=TRUE}
+CATdf <- df %>%
+  select_if(is.factor)
+apriori_rules <- apriori(CATdf, parameter = list(supp = 0.01, conf = 0.5),  appearance = list(rhs = c('y=yes')), control = list (verbose=F))
+apriori_rules_sort <- sort(apriori_rules, by='lift')
+inspect(head(apriori_rules_sort))
+```
+
+### Visualization of Association Rules
+This plot can tell us the important categorical variables and levels. We can see that poutcome=success, loan=no, contact=celluar, marital=married, and housing=no can improve the probability to subcribe a term deposit.
+
+### Plot
+```{r, cache=TRUE}
+plot(x = apriori_rules, method = 'paracoord')
+```
+
+Classification Analysis {data-orientation=rows}
+=======================================================================
+### Predict if the term deposit will be subscribed
+We predict whether the client will subscribe a term deposit. For this analysis we will perform a classification tree using different methods, like decision tree, random forest, boosting, svc, and svm.
+
+
+```{r, cache=TRUE}
+set.seed(123)
+inTraining <- createDataPartition(df$y, 
+                                  p = .6,
+                                  list = FALSE)
+df_train <- df[inTraining, ]
+df_test  <- df[-inTraining, ]
+```
+
+Row
+-----------------------------------------------------------------------
+### Decision Tree
+We use cross validation to find out the optimal parameter values for decision tree.
+
+Row
+-----------------------------------------------------------------------
+### Using CV to fit a rpart tree
+When cp=0.02, we can have higher accuracy
+```{r, cache=TRUE}
+fit_control <- trainControl(method = 'repeatedcv',
+                            number = 10,
+                            repeats = 3)
+
+cv_tree <- train(y ~ .-y_ind,
+                 data = df_train,
+                 method = 'rpart',
+                 trControl = fit_control)
+cv_tree
+```
+
+Row {data-height=800}
+-----------------------------------------------------------------------
+### Variable Importance
+```{r, cache=TRUE}
+imp <- varImp(cv_tree)$importance
+rn <- row.names(imp)
+imp_df <- tibble(variable = rn, 
+                 importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+
+p + geom_col() +
+  coord_flip() +
+  ggtitle('Decision Tree')
+```
+
+### Visualizing the tree
+We can see this tree only use duration and poutcome to build. When the contact duration was over 986 sec, clients were more likely to subscribe. Also, when the duration was less than 645 sec, and the outcome was success in previous campaign, clients were more willing to subscribe.
+
+### Tree
+```{r, cache=TRUE}
+rpart.plot(cv_tree$finalModel, type = 4)
+```
+
+
+Row
+-----------------------------------------------------------------------
+### ROC Curve for Decision Tree
+```{r, cache=TRUE}
+fits_all <- mutate(df_test,
+                   dt_pprobs = predict(cv_tree, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d = y_ind, m = dt_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+
+### Confusion Matrix
+```{r, cache=TRUE}
+pred_tree <- predict(cv_tree, newdata = df_test, type = "raw")
+cm <- confusionMatrix(table(df_test$y, pred_tree),positive = "yes")
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+
+```
+
+Row
+-----------------------------------------------------------------------
+### Analysis Summary
+With this model, we can see duration and poutcome are 2 variables that are useful to predict. but the ability to find 'yes' is not good through observing ROC Curve. 
+
+
+Row 
+-----------------------------------------------------------------------
+### Random Forest
+We use cross validation to find out the optimal parameter values in random forest.
+
+Row 
+-----------------------------------------------------------------------
+### Using CV to find out appropriate mtry
+We know when mytry=22, the accuracy is higher in training data.
+```{r, cache=TRUE}
+cv_rftree <- train(y ~ .-y_ind,
+                 data = df_train,
+                 method = 'rf',
+                 ntree = 50,
+                 trControl = fit_control)
+cv_rftree
+```
+
+### Variable Importance
+
+```{r, cache=TRUE}
+imp <- varImp(cv_rftree)$importance
+rn <- row.names(imp)
+imp_df <- tibble(variable = rn, 
+                 importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+
+p + geom_col() +
+  coord_flip() +
+  ggtitle('Ramdon Forest')
+```
+
+
+Row
+-----------------------------------------------------------------------
+### ROC Curve for Random Forest
+
+```{r, cache=TRUE}
+fits_all <- mutate(fits_all,
+                   rf_pprobs = predict(cv_rftree, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d = y_ind, m = rf_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+
+### Confusion Matrix
+
+```{r, cache=TRUE}
+pred_tree <- predict(cv_rftree, newdata = df_test, type = "raw")
+cm <- confusionMatrix(table(df_test$y, pred_tree),positive = "yes")
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Analysis Summary
+With this model, we can find more 1s, and more variables can help decide whether the clients are willing to subscribe.
+
+
+Row
+-----------------------------------------------------------------------
+### Boosting
+We use cross cross validation to look for optimal parameters to build the boosted model.
+
+Row
+-----------------------------------------------------------------------
+### Using CV to find out appropriate parameter
+
+```{r, cache=TRUE}
+set.seed(21)
+grid <- expand.grid(interaction.depth = c(1, 2, 3),
+                    n.trees = seq(0, 2000, by = 100),
+                    shrinkage = c(.01, 0.001),
+                    n.minobsinnode = 10)
+
+trainControl <- trainControl(method = "cv", number = 5)
+
+gbm_y <- train(y ~ .-y_ind,
+                 data = df_train,
+                 distribution = 'bernoulli',
+                 method = 'gbm',
+                 trControl = trainControl,
+                 tuneGrid = grid,
+                 verbose = FALSE)
+gbm_y$finalModel
+```
+
+### Variable Importance
+
+```{r, cache=TRUE}
+imp <- varImp(gbm_y)$importance
+rn <- row.names(imp)
+imp_df <- tibble(variable = rn, 
+                 importance = imp$Overall) %>%
+  arrange(desc(-importance)) %>%
+  mutate(variable = factor(variable, variable))
+
+p <- ggplot(data = imp_df,
+            aes(variable, importance))
+
+p + geom_col() +
+  coord_flip() +
+  ggtitle('Boosting')
+```
+
+Row {data-width=600, data-height=800}
+-----------------------------------------------------------------------
+### ROC Curve for Boosting
+
+```{r, cache=TRUE}
+fits_all <- mutate(fits_all,
+                   gbm_pprobs = predict(gbm_y, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d = y_ind, m = gbm_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+
+### Confusion Matrix
+We can see the accuracy, sensitivity, and specificity are little higher than the previous one.
+```{r, cache=TRUE}
+pred_tree <- predict(gbm_y, newdata = df_test, type = "raw")
+cm <- confusionMatrix(table(df_test$y, pred_tree),positive = "yes") #confusionMatrix is from the caret package
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+```
+
+Row
+-----------------------------------------------------------------------
+### SVC
+We use SVC to see whether a linear boundary can cut the data well.
+
+Row
+-----------------------------------------------------------------------
+#### Using CV to find out appropriate tuning parameter, C
+We try different C from 1 to 3.
+```{r, cache=TRUE}
+cv_svc <- train(y ~ .-y_ind,
+                      data = df_train,
+                      method = 'svmLinear',
+                      trControl = fit_control,
+                      tuneGrid = data.frame(C = 1:3))
+
+cv_svc
+```
+
+### Creating model with C = 1
+```{r, cache=TRUE}
+svc_y <- ksvm(y ~ .-y_ind,
+              data = df_train,
+              type = 'C-svc',
+              kernel = 'vanilladot',
+              prob.model = TRUE)
+
+svc_y
+```
+
+Row 
+-----------------------------------------------------------------------
+### ROC Curve for SVC
+
+```{r, cache=TRUE}
+fits_all <- mutate(fits_all,
+                   svc_pprobs = predict(svc_y, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d= y_ind, m = svc_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+### Confusion Matrix
+Through confusion matrix, we can see this model does not perform as good as boosted model.
+```{r, cache=TRUE}
+pred_tree <- predict(svc_y, newdata = df_test, type = "response")
+cm <- confusionMatrix(table(df_test$y, pred_tree),positive = "yes") #confusionMatrix is from the caret package
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+```
+
+Row
+-----------------------------------------------------------------------
+### Analysis Summary
+It is very clearly that the linear boudary is not right to the data.
+
+
+Row
+-----------------------------------------------------------------------
+### SV Machine
+As the linear boudary doesn't work well, we want to try a non-linear boudary.
+
+Row
+-----------------------------------------------------------------------
+### Using CV to find out optimal parameter values
+We try ranges of parameter values for degree, scale, and C to see the optimal one. 
+```{r, cache=TRUE}
+cv_svm_2d <- train(y ~ .-y_ind,
+                   data = df_train,
+                   method = 'svmPoly',
+                   trControl = fit_control,
+                   tuneGrid = expand.grid(data.frame(degree = 2:4,
+                                 scale = c(.001, .01, .1), 
+                                 C = 1:3)))
+cv_svm_2d
+```
+
+### Creating model with degree = 4, scale = 0.01, C = 1
+```{r, cache=TRUE}
+svm_y <- ksvm(y ~ .-y_ind,
+              data = df_train,
+              type = 'C-svc',
+              kernel = 'polydot',
+              kpar = list(degree = 4, scale = 0.01),
+              C = 1,
+              prob.model = TRUE)
+
+svm_y
+```
+
+Row 
+-----------------------------------------------------------------------
+### ROC Curve for SVM
+
+```{r, cache=TRUE}
+fits_all <- mutate(fits_all,
+                   svm_pprobs = predict(svm_y, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d= y_ind, m = svm_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+### Confusion Matrix
+We can see the non-linear boudary is not good.
+```{r, cache=TRUE}
+pred_tree <- predict(svm_y, newdata = df_test, type = "response")
+cm <- confusionMatrix(table(df_test$y, pred_tree),positive = "yes") #confusionMatrix is from the caret package
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Analysis Summary
+We are not likely to use this model to predict.
+
+
+Row
+-----------------------------------------------------------------------
+### SV Machine Radial Basis
+We use cross validation to find out optimal parameter like previously.
+
+Row
+-----------------------------------------------------------------------
+### Using CV to find out optimal parameter values
+We try ranges of parameter values for sigma, and C to see the optimal one.
+```{r, cache=TRUE}
+set.seed(1223)
+cv_svm_rad <- train(y ~ .-y_ind,
+                    data = df_train,
+                    method = 'svmRadial',
+                    trControl = fit_control,
+                    prob.model = TRUE,
+                    scale = TRUE,
+                    tuneGrid = expand.grid(data.frame(sigma = c(.001, .01, .1),
+                      C = c(1, 2, 3))))
+cv_svm_rad
+```
+
+### Creating model with sigma = 0.001, C = 1
+```{r, cache=TRUE}
+svmr_y <- ksvm(y ~ .-y_ind,
+              data = df_train,
+              type = 'C-svc',
+              kernel = 'rbfdot',
+              kpar = list(sigma = 0.001),
+              C = 1,
+              prob.model = TRUE)
+
+svmr_y
+```
+
+Row
+-----------------------------------------------------------------------
+### ROC Curve for SVM Radial Basis
+
+```{r, cache=TRUE}
+fits_all <- mutate(fits_all,
+                   svmr_pprobs = predict(svmr_y, newdata = df_test, type = 'prob')[, 2])
+
+p <- ggplot(data = fits_all,
+            aes(d= y_ind, m = svmr_pprobs)) +
+  geom_roc(n.cuts = 0, col = 'navy') +
+  style_roc()
+p + annotate('text', x = .75, y = .25,
+             label = paste('AUC = ', round(calc_auc(p)$AUC, 3)))
+```
+
+### Confusion Matrix
+In this confusion matrix, we can see all target variable in testing data is predicted as no.
+```{r, cache=TRUE}
+pred_tree <- predict(svmr_y, newdata = df_test, type = 'response')
+cm <- confusionMatrix(table(df_test$y, pred_tree), positive = "yes")
+cm$table
+cm$overall["Accuracy"]
+cm$byClass["Sensitivity"]
+cm$byClass["Specificity"]
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Analysis Summary
+Although the AUC in this model is larger than the AUC in models of SVC and SVM with 4 degree, it cannot find 1s appropriately, so we are unlikely to use it.
+
+
+Conclusion {data-orientation=rows}
+=======================================================================
+
+Row 
+-----------------------------------------------------------------------
+### Summary
+
+In Conclusion, we can see random forest and boosting can help us predict better, so we are likely to select an optimal model from all models by observing ROC Curve, and Confusion Matrix. In the end, we choose the random forest model to help us predict, as the ROC Curve is more close to the top left than The Curve in boosted model.
+
+Row
+-----------------------------------------------------------------------
+### Combining the ROC Curve in all models
+
+```{r, cache=TRUE}
+fits_all_along <- fits_all %>%
+  dplyr::select('y_ind','dt_pprobs', 'rf_pprobs', 'gbm_pprobs', 'svc_pprobs', 'svm_pprobs', 'svmr_pprobs') %>%
+  gather('method', 'prob', -1)
+p <- ggplot(data = fits_all_along,
+            aes(d = y_ind, m = prob, col = method)) +
+  geom_roc(n.cuts = 0) +
+  style_roc(xlab = '1 - Specificity', ylab = 'Sensitivity') +
+  scale_color_brewer(palette = 'Dark2')
+p + ggtitle(paste('AUC = ', paste(round(calc_auc(p)$AUC, 2), collapse = ', ')))
+```
+
+Row 
+-----------------------------------------------------------------------
+### Creating a summary of all models showing accuracy, sensitivity, and specificity.
+
+```
+Model                    Accuracy  Sensitivity  Specificity
+decision tree              0.89       0.57         0.91
+random forest              0.90       0.60         0.92
+boosting                   0.90       0.60         0.93
+SVC C=1                    0.89       0.57         0.88
+SVM_4d scale=/C= 1         0.89       0.63         0.90
+SVM_rad sigma=0.01/C= 1    0.88       0.00         0.88
+```
